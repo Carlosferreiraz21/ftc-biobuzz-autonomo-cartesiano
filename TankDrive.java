@@ -63,6 +63,7 @@ public class TankDrive {
     public static double MAX_ACCEL = 2.0;          // rampa: quanto a potência pode subir por segundo
     public static double TURN_FIRST_ANGLE = Math.toRadians(45); // erro de rumo acima disso: gira antes de andar
     public static double NO_HEADING_FIX_DIST_IN = 4.0; // perto do alvo, para de corrigir rumo (evita "rodar" no ponto)
+    public static double NEAR_LATERAL_TOLERANCE_IN = 2.0; // perto do alvo, desvio lateral aceito (tanque não anda de lado)
 
     public static double POSITION_TOLERANCE_IN = 1.0;
     public static double HEADING_TOLERANCE_RAD = Math.toRadians(2);
@@ -91,12 +92,13 @@ public class TankDrive {
         leftDrive.setDirection(LEFT_DIRECTION);
         rightDrive.setDirection(RIGHT_DIRECTION);
 
-        // Zera os encoders e passa para RUN_USING_ENCODER: o Hub controla a VELOCIDADE das
-        // rodas, então setPower(0.5) dá a mesma velocidade com bateria cheia ou fraca.
+        // Zera os encoders e usa RUN_WITHOUT_ENCODER: a potência vai DIRETO para o motor,
+        // sem limite. Os encoders continuam contando normalmente para a odometria.
+        // (RUN_USING_ENCODER limitava a velocidade máxima das rodas.)
         leftDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         rightDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        leftDrive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        rightDrive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        leftDrive.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        rightDrive.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
         leftDrive.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         rightDrive.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -181,29 +183,40 @@ public class TankDrive {
         double dy = ty - y;
         double dist = Math.hypot(dx, dy);
 
-        if (dist < POSITION_TOLERANCE_IN) {
+        // Posição do alvo vista PELO ROBÔ:
+        //   along   = quanto o alvo está à frente (negativo = ficou para trás)
+        //   lateral = quanto o alvo está para o lado (positivo = à esquerda)
+        double along = dx * Math.cos(heading) + dy * Math.sin(heading);
+        double lateral = -dx * Math.sin(heading) + dy * Math.cos(heading);
+        boolean near = dist < NO_HEADING_FIX_DIST_IN;
+
+        // "Chegou": dentro da tolerância, OU perto do alvo com a distância ao longo da
+        // frente acertada e um desvio lateral pequeno (o tanque não anda de lado).
+        boolean arrived = dist < POSITION_TOLERANCE_IN
+                || (near && Math.abs(along) < POSITION_TOLERANCE_IN
+                         && Math.abs(lateral) < NEAR_LATERAL_TOLERANCE_IN);
+        if (arrived) {
             stop();
             return settled(true);
         }
         settled(false);
 
-        // Ângulo para onde a TRASEIRA (ré) ou a FRENTE deve apontar.
-        double angleToTarget = Math.atan2(dy, dx);
-        if (reverse) angleToTarget = AngleUnit.normalizeRadians(angleToTarget + Math.PI);
-        double headingError = AngleUnit.normalizeRadians(angleToTarget - heading);
-
-        // Distância do alvo projetada no eixo do robô (negativa = alvo ficou para trás).
-        // Assim, se passar do ponto, ele volta um pouco em vez de dar a volta.
-        double along = dx * Math.cos(heading) + dy * Math.sin(heading);
-
         double forward = Range.clip(DRIVE_KP * along, -maxPower, maxPower);
         if (Math.abs(forward) < MIN_DRIVE_POWER) forward = Math.signum(along) * MIN_DRIVE_POWER;
 
-        // Tanque não anda de lado: se estiver muito torto, primeiro gira no lugar.
-        if (Math.abs(headingError) > TURN_FIRST_ANGLE) forward = 0;
-
         double turn = 0;
-        if (dist > NO_HEADING_FIX_DIST_IN) {
+        if (near && Math.abs(lateral) < NEAR_LATERAL_TOLERANCE_IN) {
+            // Perto e quase alinhado: só acerta a distância, SEM corrigir o rumo.
+            // Corrigir rumo a poucas polegadas do alvo faz o robô rodar em volta do ponto.
+        } else {
+            // Ângulo para onde a FRENTE (ou a TRASEIRA, se for de ré) deve apontar.
+            double angleToTarget = Math.atan2(dy, dx);
+            if (reverse) angleToTarget = AngleUnit.normalizeRadians(angleToTarget + Math.PI);
+            double headingError = AngleUnit.normalizeRadians(angleToTarget - heading);
+
+            // Tanque não anda de lado: se estiver muito torto, primeiro gira no lugar.
+            if (Math.abs(headingError) > TURN_FIRST_ANGLE) forward = 0;
+
             turn = Range.clip(HEADING_KP * headingError, -maxPower, maxPower);
             if (forward == 0 && Math.abs(turn) < MIN_TURN_POWER) {
                 turn = Math.signum(headingError) * MIN_TURN_POWER;

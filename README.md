@@ -24,9 +24,9 @@ Autônomo para o kit bot goBILDA (StarterBot, tração tanque) que navega por **
 | Como decide parar | Quando passam X segundos | Quando chega ao ponto pedido |
 | Sensores usados | Nenhum | Encoders + IMU do Control Hub |
 | Sabe onde está? | Não | Sim: x, y e θ a cada ciclo |
-| Bateria fraca | Anda menos e erra o ponto | Velocidade controlada (`RUN_USING_ENCODER`) |
+| Bateria fraca | Anda menos e erra o ponto | Anda mais devagar, mas para no mesmo ponto (para pela posição) |
 | Velocidade | 0,5 | Até 0,8, freando sozinho perto do alvo |
-| Lançador | O moinho liga após 3 s, na velocidade ou não | O moinho só alimenta com o lançador na velocidade |
+| Lançador | O moinho liga após 3 s, na velocidade ou não | O moinho só alimenta com o lançador na velocidade (com histerese, sem engasgar) |
 | Esquecer o reset do timer | Aconteceu 3 vezes | Impossível: `goTo()` sempre zera |
 
 ## Como o robô sabe onde está (odometria)
@@ -54,9 +54,13 @@ y = y + d · sin(θ)              // θ = ângulo médio do trecho, lido da IMU
 - "Frente" do robô = o sentido em que ele anda com potência positiva.
 - Os pontos são escritos para a **aliança vermelha**. A azul é calculada por espelho (inverte Y e θ, com `my()` e `mh()`). Confira na Figura 10-1 do manual se a arena é simétrica desse jeito.
 
+## Modo dos motores de tração
+
+As rodas usam `RUN_WITHOUT_ENCODER`: a potência vai **direto** para o motor, sem limite. Os encoders continuam contando normalmente e a odometria lê esses valores com `getCurrentPosition()`. O modo `RUN_USING_ENCODER`, usado na primeira versão, fazia o Hub controlar a velocidade das rodas e acabava limitando o robô.
+
 ## Como o robô vai até um ponto
 
-- **`driveTo(x, y)`:** calcula a distância (`Math.hypot`) e a direção (`Math.atan2`) até o alvo. Se o erro de rumo passa de 45°, primeiro gira no lugar. Depois anda corrigindo o rumo e para a menos de 1 in do alvo. Com `reverse = true`, chega de ré.
+- **`driveTo(x, y)`:** calcula a distância (`Math.hypot`) e a direção (`Math.atan2`) até o alvo. Se o erro de rumo passa de 45°, primeiro gira no lugar. Depois anda corrigindo o rumo e para a menos de 1 in do alvo. Perto do alvo (menos de 4 in), considera que chegou quando a distância ao longo da frente do robô fica dentro de 1 in, porque o tanque não anda de lado. Com `reverse = true`, chega de ré.
 - **`turnTo(θ)`:** gira até um ângulo **absoluto** da arena. `turnToFace(x, y)` gira para apontar a um ponto.
 - **Controle proporcional (P):** potência = K_P × erro, então o robô desacelera sozinho conforme se aproxima.
 - **Potência mínima:** vence o atrito, para o robô não parar antes do alvo.

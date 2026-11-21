@@ -51,7 +51,11 @@ public class StarterBotAutoCartesian extends OpMode {
 
     // ===================== LANÇADOR =====================
     static final double LAUNCHER_TARGET_VELOCITY = 285;   // ticks/s (valor que vocês já usam)
-    static final double LAUNCHER_MIN_VELOCITY = 270;      // só alimenta acima disso (~95% do alvo)
+    // Histerese do moinho: COMEÇA a alimentar acima de START e só PAUSA abaixo de STOP.
+    // Cada POLLEN lançado freia o shooter um pouco; a faixa entre os dois evita que o
+    // moinho fique parando e voltando ("engasgando") a cada disparo.
+    static final double FEED_START_VELOCITY = 270;        // ~95% do alvo
+    static final double FEED_STOP_VELOCITY = 240;         // ~85% do alvo
     static final double FEED_SECONDS = 5.0;               // tempo ALIMENTANDO (só conta com o lançador na velocidade)
     static final boolean INTAKE_HELPS_FEED = false;       // true = intake empurra o POLLEN durante o tiro
     static final double INTAKE_POWER = 1.0;
@@ -78,6 +82,7 @@ public class StarterBotAutoCartesian extends OpMode {
     private final ElapsedTime stepTimer = new ElapsedTime();
     private final ElapsedTime feedTimer = new ElapsedTime();
     private double feedSeconds = 0;
+    private boolean feeding = false;   // moinho alimentando agora? (histerese)
 
     @Override
     public void init() {
@@ -145,6 +150,7 @@ public class StarterBotAutoCartesian extends OpMode {
                         || stepTimer.seconds() > AIM_TIMEOUT_S) {
                     drive.stop();
                     feedSeconds = 0;
+                    feeding = false;
                     feedTimer.reset();
                     goTo(Step.SHOOT);
                 }
@@ -153,13 +159,16 @@ public class StarterBotAutoCartesian extends OpMode {
             case SHOOT:
                 drive.stop();
                 launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-                boolean atSpeed = launcher.getVelocity() >= LAUNCHER_MIN_VELOCITY;
+                double velocity = launcher.getVelocity();
 
                 // Só alimenta com o lançador na velocidade: cada POLLEN sai com a mesma força.
-                windmillServo.setPower(atSpeed ? 1 : 0);
-                if (intake != null && INTAKE_HELPS_FEED) intake.setPower(atSpeed ? INTAKE_POWER : 0);
+                if (!feeding && velocity >= FEED_START_VELOCITY) feeding = true;
+                else if (feeding && velocity < FEED_STOP_VELOCITY) feeding = false;
 
-                if (atSpeed) feedSeconds += feedTimer.seconds();
+                windmillServo.setPower(feeding ? 1 : 0);
+                if (intake != null && INTAKE_HELPS_FEED) intake.setPower(feeding ? INTAKE_POWER : 0);
+
+                if (feeding) feedSeconds += feedTimer.seconds();
                 feedTimer.reset();
 
                 if (feedSeconds >= FEED_SECONDS || stepTimer.seconds() > SHOOT_TIMEOUT_S) {
